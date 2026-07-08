@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from inventory_data import inventory
+from openfoodfacts import fetch_product_by_barcode, search_product_by_name
 
 app = Flask(__name__)
 CORS(app)
@@ -25,7 +26,10 @@ def home():
             "GET /inventory/<id>",
             "POST /inventory",
             "PATCH /inventory/<id>",
-            "DELETE /inventory/<id>"
+            "DELETE /inventory/<id>",
+            "GET /external/barcode/<barcode>",
+            "GET /external/search/<name>",
+            "POST /inventory/import/barcode/<barcode>"
         ]
     })
 
@@ -66,6 +70,8 @@ def add_inventory_item():
         "stock": data["stock"],
         "barcode": data.get("barcode", ""),
         "ingredients": data.get("ingredients", ""),
+        "categories": data.get("categories", ""),
+        "image_url": data.get("image_url", ""),
         "source": data.get("source", "manual")
     }
 
@@ -89,7 +95,17 @@ def update_inventory_item(item_id):
     if not data:
         return jsonify({"error": "Request body must be JSON"}), 400
 
-    allowed_fields = ["name", "brand", "price", "stock", "barcode", "ingredients"]
+    allowed_fields = [
+        "name",
+        "brand",
+        "price",
+        "stock",
+        "barcode",
+        "ingredients",
+        "categories",
+        "image_url",
+        "source"
+    ]
 
     for key, value in data.items():
         if key in allowed_fields:
@@ -113,6 +129,56 @@ def delete_inventory_item(item_id):
     return jsonify({
         "message": "Inventory item deleted successfully"
     }), 200
+
+
+@app.route("/external/barcode/<barcode>", methods=["GET"])
+def external_product_by_barcode(barcode):
+    product = fetch_product_by_barcode(barcode)
+
+    if not product:
+        return jsonify({"error": "Product not found from external API"}), 404
+
+    return jsonify(product), 200
+
+
+@app.route("/external/search/<name>", methods=["GET"])
+def external_product_by_name(name):
+    product = search_product_by_name(name)
+
+    if not product:
+        return jsonify({"error": "Product not found from external API"}), 404
+
+    return jsonify(product), 200
+
+
+@app.route("/inventory/import/barcode/<barcode>", methods=["POST"])
+def import_product_by_barcode(barcode):
+    product = fetch_product_by_barcode(barcode)
+
+    if not product:
+        return jsonify({"error": "Product not found from external API"}), 404
+
+    data = request.get_json() if request.is_json else {}
+
+    new_item = {
+        "id": generate_id(),
+        "name": product["name"],
+        "brand": product["brand"],
+        "price": data.get("price", 0),
+        "stock": data.get("stock", 0),
+        "barcode": product["barcode"],
+        "ingredients": product["ingredients"],
+        "categories": product["categories"],
+        "image_url": product["image_url"],
+        "source": product["source"]
+    }
+
+    inventory.append(new_item)
+
+    return jsonify({
+        "message": "Product imported and added to inventory successfully",
+        "item": new_item
+    }), 201
 
 
 if __name__ == "__main__":
